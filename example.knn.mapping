@@ -1,0 +1,24 @@
+{
+    "settings": {
+        "number_of_shards": 1,
+        "number_of_replicas": 0,
+        "index": {
+            "knn": true,
+            "knn.space_type": "cosinesimil"
+        }
+    },
+    "mappings": {
+        "properties": {
+            "vector": {
+                "type": "knn_vector",
+                "dimension": 768
+            },
+            "id":  { "type": "keyword" },
+            "filename":  { "type": "keyword" },
+            "access":  { "type": "text" },
+            "title":  { "type": "text" },
+            "creators":  { "type": "text" },
+            "subject":  { "type": "text" }
+        }
+    }
+}
