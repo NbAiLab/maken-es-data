@@ -32,7 +32,7 @@ Optional arguments:
 Example usage:
 
 ```bash
-./api_downloader.py -f mediatype:bilder contentClasses:JP2 --size 15
+./api_downloader.py -f mediatype:bilder -f contentClasses:JP2 --size 15
 ```
 
 ## Image Vectorizer
