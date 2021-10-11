@@ -135,7 +135,7 @@ def get_image(
         except (UnidentifiedImageError, OSError):
             logger.info(f"Failed to load image {image_dest.name}")
     if download and image is None:
-        logger.info(f"Downloading image for {id} ({filename})")
+        logger.info(f"Downloading image for {filename}")
         response = requests.get(iiif.format(width=600, height=600))
         if not response.ok:
             response = requests.get(iiif.format(width=300, height=300))
@@ -193,7 +193,7 @@ def get_vectors(
     vector_dests = []
     for record in records:
         try:
-            id = record["id"]
+            record_id = record["id"]
             filename = record["filename"]
             access = record["access"]
             iiif = record["iiif"]
@@ -202,11 +202,11 @@ def get_vectors(
             continue
         dest = Path(os.path.join(output, access))
         dest.mkdir(parents=True, exist_ok=True)
-        vector_dest = dest / f"{id}{vector_suffix}.{vector_format}"
+        vector_dest = dest / f"{record_id}{vector_suffix}.{vector_format}"
         if not overwrite and vector_dest.exists():
             continue
-        image_dest = dest / f"{id}.jpg"
-        image = get_image(iiif, image_dest)
+        image_dest = dest / f"{record_id}.jpg"
+        image = get_image(iiif, image_dest, download, filename)
         if image is None:
             continue
         tensor = preprocess_input(img_to_array(image.resize((299, 299))))
