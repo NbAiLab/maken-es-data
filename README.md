@@ -35,6 +35,14 @@ Example usage:
 ./api_downloader.py -f mediatype:bilder -f contentClasses:JP2 --size 15
 ```
 
+A few interesting filters:
+
+- `mediatype:bilder` for images
+- `mediatype:bøker` for books
+- `contentClasses:JP2` for images in JPEG2000 format
+- `digital:Ja` for images for which there is a digital version
+- `firstDigitalContentTime:[20210922 TO 20310101]` for a time bounded query on digitization time
+
 ## Image Vectorizer
 
 Transforms records of images extrated using api.nb.no into vectors (embeddings).
