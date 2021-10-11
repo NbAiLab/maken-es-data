@@ -212,6 +212,7 @@ def get_vectors(
         tensor = preprocess_input(img_to_array(image.resize((299, 299))))
         tensors.append(tensor)
         vector_dests.append(vector_dest)
+        image.close()
     if vector_dests:
         if on_batches:
             vectors = model.predict_on_batch(tf.stack(tensors))
