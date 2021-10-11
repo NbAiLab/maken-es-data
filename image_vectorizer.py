@@ -23,7 +23,7 @@ from urllib3.util import Retry
 
 import tensorflow as tf
 from keras.applications.inception_v3 import preprocess_input
-from keras.applications import InceptionV3, imagenet_utils
+from tensorflow.keras.applications import InceptionV3, imagenet_utils
 from keras.models import Model
 from keras.preprocessing.image import save_img, img_to_array, array_to_img
 from keras_preprocessing.image import load_img
