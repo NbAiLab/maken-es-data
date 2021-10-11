@@ -144,7 +144,7 @@ if __name__ == "__main__":
         help="Path to output folder. Defaults to ./out")
     parser.add_argument('--endpoint', '-e', default="/catalog/v1/items",
         help="Endpoint to use in the requests. Defaults to 'catalog/v1/items'")
-    parser.add_argument('--filter', '-f', nargs='*',
+    parser.add_argument('--filter', '-f', nargs='*',  action='append',
         help="Filters to add to the query")
     parser.add_argument('--scroll', action='store_true',
         help="Whether or not enable scrolling (resource intensive). "
