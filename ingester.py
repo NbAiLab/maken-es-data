@@ -66,7 +66,16 @@ def insert_vector_file_vct(vector_file, index_name, bar=None):
     )
 
 
-def insert_vector_file(record_file, vector_file, index_name, bar=None):
+def load_vector(vector_file, vector_format):
+    if vector_format in ("npy", "numpy"):
+        vector = np.load(vector_file).tolist()
+    else:  # vct, txt
+        with vector_file.open() as f:
+            vector = np.array(f.read().splitlines(), dtype="float").tolist()
+    return vector
+
+
+def insert_vector_file(record_file, vector_file, index_name, vector_format="npy", bar=None):
     global global_elastic_handler
     elastic_handler = global_elastic_handler
     filename = record_file.name.split("/")[-1]
@@ -76,7 +85,7 @@ def insert_vector_file(record_file, vector_file, index_name, bar=None):
     else:
         print(msg)
     try:
-        vector = np.load(vector_file).tolist()
+        vector = load_vector(vector_file, vector_format)
     except FileNotFoundError:
         logger.warning(f"Vector file {vector_file} not found")
         return
@@ -173,13 +182,9 @@ if __name__ == '__main__':
             vectors_path
             / f"{vector_file}{args.vectors_suffix}.{args.vectors_format}"
         )
-        if args.vectors_format in ("vct", "txt"):
-            insert_vector_file_vct(
-                vector_file, index_name, bar=bar
-            )
-        elif args.vectors_format in ("npy", "numpy"):
+        if args.vectors_format in ("vct", "txt", "plain", "text", "npy", "numpy"):
             insert_vector_file(
-                record_file, vector_file, index_name, bar=bar
+                record_file, vector_file, index_name, args.vectors_format, bar=bar
             )
         else:
             logger.warning("Invalid vector format")

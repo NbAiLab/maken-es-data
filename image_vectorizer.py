@@ -22,8 +22,9 @@ from tqdm import tqdm
 from urllib3.util import Retry
 
 import tensorflow as tf
+from tensorflow.keras.applications import InceptionV3
 from keras.applications.inception_v3 import preprocess_input
-from tensorflow.keras.applications import InceptionV3, imagenet_utils
+from keras.applications import imagenet_utils
 from keras.models import Model
 from keras.preprocessing.image import save_img, img_to_array, array_to_img
 from keras_preprocessing.image import load_img
@@ -84,7 +85,7 @@ def get_records(
     records = []
     for index, file in enumerate(filepath):
         if batch and math.ceil(index / batch) >= step:
-            if not file.is_file():
+            if not file.is_file() or file.suffix.lower() != ".json":
                 continue
             with file.open() as record_file:
                 record_json = json.load(record_file)
@@ -135,7 +136,7 @@ def get_image(
         except (UnidentifiedImageError, OSError):
             logger.info(f"Failed to load image {image_dest.name}")
     if download and image is None:
-        logger.info(f"Downloading image for {filename}")
+        # logger.info(f"Downloading image for {filename}")
         response = requests.get(iiif.format(width=600, height=600))
         if not response.ok:
             response = requests.get(iiif.format(width=300, height=300))
@@ -178,6 +179,7 @@ def get_vectors(
     # n_jobs=None,
     bar: Optional[tqdm]=None,
     skip: bool=False,
+    inference: bool=True,
 ) -> NoReturn:
     """
     For each record in records, extract the corresponding image when
@@ -186,7 +188,8 @@ def get_vectors(
     logger = get_logger()
     if skip:
         return
-    model = get_model() if model is None else model  # useful to parallelize
+    if inference:
+        model = get_model() if model is None else model  # useful to parallelize
     if not isinstance(records, (tuple, list)):
         records = [records]
     tensors = []
@@ -209,11 +212,12 @@ def get_vectors(
         image = get_image(iiif, image_dest, download, filename)
         if image is None:
             continue
-        tensor = preprocess_input(img_to_array(image.resize((299, 299))))
-        tensors.append(tensor)
-        vector_dests.append(vector_dest)
+        if inference:
+            tensor = preprocess_input(img_to_array(image.resize((299, 299))))
+            tensors.append(tensor)
+            vector_dests.append(vector_dest)
         image.close()
-    if vector_dests:
+    if inference and vector_dests:
         if on_batches:
             vectors = model.predict_on_batch(tf.stack(tensors))
         else:
@@ -238,15 +242,16 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
     logger = get_logger()
     logger.info(f"Reading records: {args.records_dir}/{args.records_glob}")
     logger.info(f"Writing vectors: {args.vectors_dir}/{args.records_glob}{args.vectors_suffix}.{args.vectors_format}")
-    logger.info(f"Vectors will {'' if args.overwrite else 'NOT'} be overwritten")
-    logger.info(f"Images will {'' if args.download else 'NOT'} be downloaded if missing")
+    logger.info(f"Vectors will {'' if args.overwrite else 'NOT '}be overwritten")
+    logger.info(f"Images will {'' if args.download_images else 'NOT '}be downloaded if missing")
+    logger.info(f"Inference will {'' if args.inference else 'NOT '}be run")
     logger.info(f"Processing batches of {args.batch} files")
     logger.info(f"Starting from iteration step {args.step}")
 
     logger.info("Calculating number of records...")
     path = Path(args.records_dir).rglob(args.records_glob)
-    total = len(list(None for p in path if p.is_file()))
-    logger.info(f"Found {total} record files ({math.ceil(total / args.batch)}) batches")
+    total = len(list(None for p in path if p.is_file() and p.suffix.lower() == ".json"))
+    logger.info(f"Found {total} record files ({math.ceil(total / args.batch)} batches)")
     path = Path(args.records_dir).rglob(args.records_glob)
 
     logger.info(f"Running using {'all' if args.n_jobs < 0 else args.n_jobs} processes")
@@ -261,11 +266,12 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
             vector_format=args.vectors_format,
             vector_suffix=args.vectors_suffix,
             overwrite=args.overwrite,
-            download=args.download,
+            download=args.download_images,
             model=get_model() if args.n_jobs == 1 else None,
             on_batches=args.batch > 1 or args.n_jobs < 0 or args.n_jobs > 1,
             bar=bar if args.n_jobs == 1 else None,
             skip=step < args.step,
+            inference=args.inference,
         )
         for step, records in enumerate(bar))
 
@@ -290,32 +296,36 @@ if __name__ == '__main__':
         metavar='records-glob', help='Glob for the directory with the records files')
     parser.add_argument('vectors_dir',
         metavar='vectors-dir', help='Directory to store vectors files')
-    parser.add_argument('vectors_format',
-        metavar='vectors-format', default="npy",
+    parser.add_argument('--vectors_format',
+        default="npy",
         help='File format of the vectors files. Either npy or vct (plain text)',
     )
-    parser.add_argument('vectors_suffix',
-        metavar='vectors-suffix', default="",
+    parser.add_argument('--vectors_suffix',
+        default="",
         help='Filename suffix of the vectors files',
     )
-    parser.add_argument('overwrite',
-        metavar='vectors-overwrite', default=False, type=yesno,
+    parser.add_argument('--no-inference', dest='inference',
+        action='store_false',
+        help='Disable model inference and vector generation. Defaults to False'
+    )
+    parser.add_argument('--overwrite', '-o',
+        default=False, action='store_true',
         help='Overwrite vectors. Defaults to False'
     )
-    parser.add_argument('download',
-        metavar='download-images', default=False, type=yesno,
-        help='Download images if missing. Defaults to False'
+    parser.add_argument('--no-download-images', dest='download_images',
+        action='store_false',
+        help='Disable downloading images if missing. Defaults to False'
     )
-    parser.add_argument('n_jobs',
-        metavar='n-jobs', default=1, type=int,
+    parser.add_argument('--n_jobs', '-j',
+        default=1, type=int,
         help='Number of multiprocessing jobs. Defaults to 1 (-1 for max)',
     )
-    parser.add_argument('batch',
-        metavar='batch', default=1, type=int,
+    parser.add_argument('--batch', '-b',
+        default=1, type=int,
         help='Number of inputs per batch for prediction. Defaults to 1',
     )
-    parser.add_argument('step',
-        metavar='step', default=0, type=int,
+    parser.add_argument('--step', '-s',
+        default=0, type=int,
         help='Iteration step to start the process. Defaults to 0',
     )
     args = parser.parse_args()

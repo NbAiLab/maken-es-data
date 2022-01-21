@@ -128,6 +128,38 @@ Example usage:
 ./ingester.py 192.0.0.10 9200 user pass restricted.knn.mapping ./data/records/images/norway/ ./data/vectors/images/norway/ npy _inceptionv3 500 false 0
 ```
 
+### Circuit breaker issues
+
+With around 1 million vectors with 2048 dimensions in 2 shards, the amount of memory need is around 18GB (1.1 * (4 * 2048 + 8 * 16) * 2000000), which might cause circuit breaker issues if the available RAM after the JVM is less than that and the default policy for the circuit breaker is the default 50%. As a work around (besides adding more RAM), is to disable the cuircuit breaker limit so the cache is removed and ingesting can continue.
+
+- `GET _cluster/settings?include_defaults=true`
+
+- `PUT _cluster/settings`
+
+```json
+{
+    "persistent": {
+        "knn.memory.circuit_breaker.limit": null
+    }
+}
+```
+
+- `PUT _cluster/settings`
+
+```json
+{
+    "transient": {
+        "knn.memory.circuit_breaker.limit": null
+    }
+}
+```
+
+### Warmup
+
+After ingestion, the kNN indices can be warmed up. More on [Performance tuning](https://opensearch.org/docs/latest/search-plugins/knn/performance-tuning/).
+
+- `GET _plugins/_knn/warmup/images.knn,books.knn`
+
 ## Pipeline
 
 An example pipeline could download all image records, get their IIIF images, convert them into vectors, and insert them into a Elasticsearch instance.
