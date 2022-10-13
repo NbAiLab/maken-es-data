@@ -1,60 +1,107 @@
 #!/usr/bin/env python
 import argparse
-from asyncio.log import logger
 import gc
 import io
 import json
 import math
+from optparse import Option
 import os
+import re
+import xml.etree.ElementTree as ET
 # import warnings; warnings.filterwarnings("ignore")
 from pathlib import Path
 from typing import Iterator, List, NoReturn, Optional, Tuple, Union
 
+import numpy as np
 import requests
 from joblib import Parallel, delayed
 from joblib import Memory
-from PIL import Image, ImageFile, UnidentifiedImageError
 from tqdm import tqdm
-
-import tensorflow as tf
-from tensorflow.keras.applications import InceptionV3
-from tensorflow.keras.applications.inception_v3 import preprocess_input
-from tensorflow.keras.models import Model
-from tensorflow.keras.preprocessing.image import img_to_array
+from gensim.models.doc2vec import Doc2Vec as Model
 
 from utils import get_http, get_logger, save_vector
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-ImageFile.LOAD_TRUNCATED_IMAGES = True
 location = os.environ.get("CACHE_DIR", ".cache")
 memory = Memory(location, verbose=0)
+URN_DATE_RE = re.compile(r"_\d{4}\d{2}\d{2}")
 
 
 @memory.cache
 def get_model() -> Model:
     """Get a pre-trained model to run inference with"""
-    base = InceptionV3(include_top=True, weights='imagenet')
-    return Model(inputs=base.input, outputs=base.get_layer('avg_pool').output)
+    return None
 
 
-def preprocess_image(image: Image.Image)-> tf.Tensor:
-    return preprocess_input(img_to_array(image.resize((299, 299))))
+def preprocess_book(book: str)-> str:
+    return book
 
 
 def model_predict(
     model: Model,
-    tensors: List[tf.Tensor],
+    tokens: List[List[str]],
     on_batches: bool=False
-) -> tf.Tensor:
+) -> np.ndarray:
     if on_batches:
-        vectors = model.predict_on_batch(tf.stack(tensors))
+        pass
+        # vectors = model.predict_on_batch(tf.stack(tensors))
     else:
-        vectors = model.predict(
-            (tf.expand_dims(t, 0) for t in tensors),
-            use_multiprocessing=True,
-            workers=os.cpu_count(),
-        )
-    return vectors
+        # vectors = model.predict(
+        #     (tf.expand_dims(t, 0) for t in tensors),
+        #     use_multiprocessing=True,
+        #     workers=os.cpu_count(),
+        # )
+        pass
+    return [0.0]
+
+
+def get_text_from_alto(
+    raw: bytes,
+    url: Optional[str]=None,
+    alto_textline_xpath: Optional[str]=None,
+    alto_string_threshold: Optional[float]=None,
+) -> str:
+    """ Convert ALTO xml file to element tree and return text """
+    alto = io.BytesIO(raw)
+    try:
+        xml = ET.parse(alto)
+    except ET.ParseError as e:
+        print(f"Parser Error in file '{alto}': {e}")
+    # Register ALTO namespaces
+    # https://www.loc.gov/standards/alto/ | https://github.com/altoxml
+    namespace = {
+        'alto-1':   'http://schema.ccs-gmbh.com/metae/alto.xsd',
+        'alto-1.2': 'http://schema.ccs-gmbh.com/metae/alto-1-2.xsd',
+        'alto-1.4': 'http://schema.ccs-gmbh.com/metae/alto-1-4.xsd',
+        'alto-2':   'http://www.loc.gov/standards/alto/ns-v2#',
+        'alto-3':   'http://www.loc.gov/standards/alto/ns-v3#',
+        'alto-4':   'http://www.loc.gov/standards/alto/ns-v4#',
+    }
+    logger = get_logger()
+    # Extract namespace from document root
+    if 'http://' in str(xml.getroot().tag.split('}')[0].strip('{')):
+        xmlns = xml.getroot().tag.split('}')[0].strip('{')
+    else:
+        try:
+            ns = xml.getroot().attrib
+            xmlns = str(ns).split(' ')[1].strip('}').strip("'")
+        except IndexError:
+            logger.info(f"ALTO error '{str(url)}': no namespace declaration found.")
+            xmlns = "no_namespace_found"
+    text = ""
+    if xmlns in namespace.values():
+        if alto_textline_xpath is None:
+            alto_textline_xpath = ".//Page//PrintSpace//TextLine"
+        if alto_string_threshold is None:
+            alto_string_threshold = 0.0
+        for lines in xml.iterfind(alto_textline_xpath):
+            text += "\n"
+            for line in lines.findall("String"):
+                confidence = float(line.attrib.get("WC", 0.0))
+                if confidence >= alto_string_threshold:
+                    text += line.attrib.get("CONTENT") + " "
+    else:
+        logger.info("ALTO error '{url}': namespace {xmlns} is not registered.")
+    return text
 
 
 def get_records(
@@ -69,6 +116,8 @@ def get_records(
     """
     logger = get_logger()
     records = []
+    # ALTO files are not yet listed in the record metadata
+    altos_url = "https://api.nb.no/catalog/v1/metadata/{record_id}/altos/"
     filepath = path.rglob(args.records_glob)
     for index, file in enumerate(filepath):
         if batch and math.ceil(index / batch) >= step:
@@ -76,12 +125,6 @@ def get_records(
                 continue
             with file.open() as record_file:
                 record_json = json.load(record_file)
-                try:
-                    iiif = record_json['_links']['thumbnail_custom']['href']
-                except KeyError:
-                    logger.info(f"File {file.name} does not have IIIF link")
-                    iiif = ""
-                    continue
                 urn = (
                     record_json['metadata']['identifiers']['urn']
                     .replace("URN:NBN:no-nb_", "")
@@ -94,13 +137,12 @@ def get_records(
                     'id' : record_json['id'],
                     'filename': urn,
                     'access': access,
-                    'iiif': iiif,
                     'title': record_json['metadata'].get("title", ""),
                     'creators': record_json['metadata'].get("creators", ""),
                     'subject': subjects,
+                    'altos': altos_url.format(record_id=record_json['id']),
                     'path': file.relative_to(path).parent
                 }
-
         else:
             record = {}
         if batch is None:
@@ -112,69 +154,98 @@ def get_records(
             records = []
 
 
-def search_image(filename: str, paths: List[Path]) -> Optional[str]:
-    access_levels = (
-        "",
-        "everywhere", "library", "nb", "norway",
-        "EVERYWHERE", "LIBRARY", "NB", "NORWAY",
+def download_book(
+    http: requests.Session,
+    altos: str,
+    filename: str,
+) -> Optional[str]:
+    logger = get_logger()
+    try:
+        response = http.get(altos)
+        response_ok = response.ok
+        response_message = f"status {response.status_code}"
+    except requests.exceptions.ConnectionError as error:
+        response_ok = False
+        response_message = str(error)
+    if not response_ok:
+        logger.info(
+            f"ALTOs for {filename} ({altos}) could not be retrieved "
+            f"({response_message})"
+        )
+        return
+    pages = []
+    record_altos = response.json()["_links"]["alto"]
+    record_altos_bar = tqdm(
+        record_altos, position=1, leave=False, desc="- Pages"
     )
-    for access in access_levels:
-        for path in paths:
-            image_file = path / access / filename
-            if image_file.exists():
-                return Image.open(image_file.read_bytes()).convert("RGB")
+    for record_alto in record_altos_bar:
+        record_alto_response = http.get(record_alto["href"])
+        if record_alto_response.ok:
+            pages.append(
+                get_text_from_alto(
+                    record_alto_response.content, url=record_alto["href"]
+                )
+            )
+        elif record_alto_response.status_code == 401:
+            # If a page gets unauthroized, then the entire books is
+            pages = []
+            break
+    book = "\n".join(pages)
+    return book
+
+
+def search_book(filename: str, paths: List[Path]) -> Optional[str]:
+    for path in paths:
+        urn_date_match = URN_DATE_RE.search(filename)
+        if urn_date_match:
+            urn_date = urn_date_match.group()
+            book_file = (
+                path
+                / urn_date[1:5] / urn_date[5:7] / urn_date[7:9]
+                / f"{filename}.txt"
+            )
+            if book_file.exists():
+                return book_file.read_text()
     # # Run expensive searchs if not found
     # for path in paths:
-    #     for image_file in path.rglob("*"):
-    #         if image_file.name == filename:
-    #             return Image.open(image_file.read_bytes()).convert("RGB")
+    #     for book_file in path.rglob("*"):
+    #         if book_file.stem == filename:
+    #             return book_file.read_text()
 
 
-def download_image(
+def get_book(
     http: requests.Session,
-    iiif: str,
-) -> Optional[Image.Image]:
-    image = None
-    response = http.get(iiif.format(width=600, height=600))
-    if not response.ok:
-        response = http.get(iiif.format(width=300, height=300))
-    if response.ok:
-        image = Image.open(io.BytesIO(response.content)).convert("RGB")
-    return image
-
-
-def get_image(
-    http: requests.Session,
-    iiif: str,
-    image_dest: Path,
+    altos: str,
+    book_dest: Path,
     download: bool,
     filename: str,
     local_paths: Optional[List[str]]=None,
-) -> Optional[Image.Image]:
+) -> Optional[str]:
     """
     Read an image from image_dest and if it doesn't exist, will try to
     download it base don the iiif URL (unless download is set to False).
-    The filename is only use for logging purposes
+    If local_paths are passed in, filename will be searched in them before
+    downloading it.
     """
     logger = get_logger()
-    image = None
-    if image_dest.exists():
+    book = None
+    if book_dest.exists():
         try:
-            image = Image.open(image_dest).convert("RGB")
-        except (UnidentifiedImageError, OSError):
-            logger.info(f"Failed to load image {image_dest.name}")
-    if download and image is None:
+            book = book_dest.read_text()
+        except (OSError):
+            logger.info(f"Failed to load book {book_dest.name}")
+    if download and book is None:
         if local_paths:
             try:
-                image = search_image(
-                    image_dest.name, [Path(path) for path in local_paths],
+                book = search_book(
+                    filename, [Path(path) for path in local_paths]
                 )
-            except (Exception):
-                logger.info(f"Failed to load image {image_dest.name}")
-        if image is None:
-            image = download_image(http, iiif)
-        image.save(image_dest, format='JPEG', subsampling=0, quality=100)
-    return image
+            except (OSError):
+                logger.info(f"Failed to load book {book_dest.name}")
+        if book is None:
+            book = download_book(http, altos, filename)
+        book_dest.write_text(book)
+    return book
 
 
 def get_vectors(
@@ -204,7 +275,7 @@ def get_vectors(
         model = get_model() if model is None else model  # useful to parallelize
     if not isinstance(records, (tuple, list)):
         records = [records]
-    tensors = []
+    tokens = []
     vector_dests = []
     http = get_http(retries=retries)
     for record in records:
@@ -212,7 +283,7 @@ def get_vectors(
             record_id = record["id"]
             filename = record["filename"]
             path = record["path"]
-            iiif = record["iiif"]
+            altos = record["altos"]
         except KeyError as err:
             logger.info(f"Skipping record {str(record)} ({str(err)})")
             continue
@@ -221,19 +292,16 @@ def get_vectors(
         vector_dest = dest / f"{record_id}{vector_suffix}.{vector_format}"
         if not overwrite and vector_dest.exists():
             continue
-        image_dest = dest / f"{record_id}.jpg"
-        image = get_image(
-            http, iiif, image_dest, download, filename, local_paths
-        )
-        if image is None:
+        book_dest = dest / f"{record_id}.txt"
+        book = get_book(http, altos, book_dest, download, filename, local_paths)
+        if book is None:
             continue
         if inference:
-            tensor = preprocess_image(image)
-            tensors.append(tensor)
+            book_tokens = preprocess_book(book)
+            tokens.append(book_tokens)
             vector_dests.append(vector_dest)
-        image.close()
     if inference and vector_dests:
-        vectors = model_predict(model, tensors, on_batches)
+        vectors = model_predict(model, tokens, on_batches)
         for vector_dest, vector in zip(vector_dests, vectors):
             save_vector(
                 vector.squeeze(), vector_dest, vector_format, record=record,
@@ -242,7 +310,7 @@ def get_vectors(
                 bar.set_description(
                     f"Saving vector {vector_dest.name} ({vector.shape})"
                 )
-    del tensors
+    del tokens
     del vector_dests
     gc.collect()
 
@@ -253,7 +321,7 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
     logger.info(f"Reading records: {args.records_dir}/{args.records_glob}")
     logger.info(f"Writing vectors: {args.vectors_dir}/{args.records_glob}{args.vectors_suffix}.{args.vectors_format}")
     logger.info(f"Vectors will {'' if args.overwrite else 'NOT '}be overwritten")
-    logger.info(f"Images will {'' if args.download_images else 'NOT '}be downloaded if missing")
+    logger.info(f"Books will {'' if args.download_books else 'NOT '}be downloaded if missing")
     logger.info(f"Inference will {'' if args.inference else 'NOT '}be run")
     logger.info(f"Processing batches of {args.batch} files")
     logger.info(f"Starting from iteration step {args.step}")
@@ -262,6 +330,7 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
     path = Path(args.records_dir).rglob(args.records_glob)
     total = len(list(None for p in path if p.is_file() and p.suffix.lower() == ".json"))
     logger.info(f"Found {total} record files ({math.ceil(total / args.batch)} batches)")
+    # path = Path(args.records_dir).rglob(args.records_glob)
 
     logger.info(f"Running using {'all' if args.n_jobs < 0 else args.n_jobs} processes")
     records = get_records(
@@ -272,7 +341,7 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
     )
     bar = tqdm(
         records,
-        desc="Images",
+        desc="Books",
         total=math.ceil(total / args.batch),
         position=0,
     )
@@ -283,7 +352,7 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
             vector_format=args.vectors_format,
             vector_suffix=args.vectors_suffix,
             overwrite=args.overwrite,
-            download=args.download_images,
+            download=args.download_books,
             local_paths=[p.strip() for p in args.search_local_paths.split(",")],
             model=get_model() if args.n_jobs == 1 else None,
             on_batches=args.batch > 1 or args.n_jobs < 0 or args.n_jobs > 1,
@@ -298,16 +367,16 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
 if __name__ == '__main__':
     yesno = lambda x: str(x).lower() in {'true', 't', '1', 'yes', 'y'}
     parser = argparse.ArgumentParser(description=f""
-    f"Transforms records of images extrated using api.nb.no into vectors "
+    f"Transforms records of books extrated using api.nb.no into vectors "
     f"(embeddings). "
     f"Using the records JSON files in records-dir, iterate over them in "
-    f"batches, download the corresponding IIIF images if available, "
-    f"and turn them into vectors using Inception V3. The resulting vectors "
-    f"(and downloaded images) will be stored in vectors-dir. "
+    f"batches, download the corresponding ALTO files if available, "
+    f"and turn them into vectors using a custom Dov2Vec. The resulting vectors "
+    f"(and downloaded books) will be stored in vectors-dir. "
     f"Note that vectors-dir will replicate the structure in records-dir, thus "
     f"specifying a proper records-glob is mandatory"
     f"", epilog=f"""Example usage:
-    {__file__} ./records "*" ./vectors --vectors_format txt --n-jobs -1 -b 100
+    {__file__} ./records "*" ./vectors --vectors_format txt --n_jobs -1 -b 100
     """, formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('records_dir',
         metavar='records-dir', help='Directory with the records files')
@@ -317,7 +386,7 @@ if __name__ == '__main__':
         metavar='vectors-dir', help='Directory to store vectors files')
     parser.add_argument('--vectors_format',
         default="npy",
-        help='File format of the vectors files. Either npy or vct (plain text)',
+        help='File format of the vectors files. Either npy, txt, json.',
     )
     parser.add_argument('--vectors_suffix',
         default="",
@@ -331,9 +400,9 @@ if __name__ == '__main__':
         default=False, action='store_true',
         help='Overwrite vectors. Defaults to False'
     )
-    parser.add_argument('--no_download_images', dest='download_images',
+    parser.add_argument('--no_download_books', dest='download_books',
         action='store_false',
-        help='Disable downloading images if missing. Defaults to False'
+        help='Disable downloading books if missing. Defaults to False'
     )
     parser.add_argument('--n_jobs', '-j', dest='n_jobs',
         default=1, type=int,
@@ -348,10 +417,10 @@ if __name__ == '__main__':
         help='Iteration step to start the process. Defaults to 0',
     )
     parser.add_argument('--retries', '-r', default=10,
-        help="Number of retries when retrieving a IIIF image. Defaults to 10",
+        help="Number of retries when retrieving an ALTO book. Defaults to 10",
         type=int)
     parser.add_argument('--search_local_paths', default="",
-        help="Search for the image ID in local paths (comma separated)",
+        help="Search for the book URN in local paths (comma separated)",
         type=str)
     args = parser.parse_args()
     main(args)

@@ -9,7 +9,7 @@ Downloader of JSON records of the catalog in `https://api.nb.no`. It uses the `/
 Usage:
 
 ```bash
-./api_downloader.py [-h] [--output-folder OUTPUT] [--endpoint ENDPOINT] [--filter [FILTER [FILTER ...]]] [--scroll] [--profile PROFILE] [--page PAGE] [--size SIZE] [--criteria CRITERIA]
+./api_downloader.py [-h] [--output-folder OUTPUT] [--endpoint ENDPOINT] [--filter [FILTER [FILTER ...]]] [--scroll] [--profile PROFILE] [--page PAGE] [--size SIZE] [--groupby GROUPBY]
 ```
 
 Optional arguments:
@@ -22,7 +22,7 @@ Optional arguments:
 - `--profile PROFILE`. Profile. Defaults to `wwwnbno`.
 - `--page PAGE`, `-p PAGE`. Start at a specific page. Defaults to 0.
 - `--size SIZE`, `-s SIZE`. Number of results per page. Defaults to 25 [1-100].
-- `--criteria CRITERIA`. JSON field key to use as criteria to split records in the output folder. Defaults to `accessInfo.accessAllowedFrom`.
+- `--groupby GROUPBY`.  JSON field key to use as groupby key to put records in the output folder. Defaults to `accessInfo.accessAllowedFrom`. If only part of the value is needed, a regular expression can be passed in after a semicolon, as in `metadata.originInfo.firstDigitalContentTime:\d{4}-\d{2}-\d{2}`. For `YYYY-MM-DD` dates a short form `DATE` can be used, and for `hh:m:ss` times, `TIME` is also available. Comma separated values can also be used.
 - `--delay DELAY`, `-d DELAY`. Number of seconds to space out requests. Defaults to 1.0
 - `--timeout TIMEOUT`, `-t TIMEOUT`. Number of seconds to wait for a response. Defaults to 300
 - `--retries RETRIES`, `-r RETRIES`. Number of retries when retrieven a URL. Defaults to 10

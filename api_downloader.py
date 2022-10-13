@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 import argparse
+from distutils.log import debug
 import json
 import logging
 import os
-import time
+import re
 import sys
+import time
 from functools import reduce
 from pathlib import Path
 from typing import Tuple
@@ -58,8 +60,31 @@ def parse_page(
         return {}
 
 
+def get_item_values(item: dict, groupbys: list) -> list:
+    values = []
+    for groupby in groupbys:
+        if ":" in groupby:
+            groupby_terms, regex = groupby.split(":")
+        else:
+            groupby_terms, regex = groupby, ""
+        try:
+            value = reduce(dict.__getitem__, groupby_terms.split("."), item)
+        except KeyError:
+            value = "unknown"
+        if regex:
+            if regex == "DATE":
+                regex = "\d{4}-\d{2}-\d{2}"
+            elif regex == "TIME":
+                regex = "\d{2}:\d{2}:\d{2}"
+            match = re.compile(regex).search(value)
+            if match:
+                value = match.group()
+        values.append(value)
+    return values
+
+
 def process_page(
-    page: dict, output: str, criteria: list, overwrite: bool=False
+    page: dict, output: str, groupbys: list, overwrite: bool=False
 ) -> bool:
     """
     Given a dict with the response of a API page, parse it to extract
@@ -69,11 +94,8 @@ def process_page(
     items = embedded.get("items", {})
     for item in items:
         item_id = item["id"]
-        try:
-            out = reduce(dict.__getitem__, criteria, item).lower()
-        except KeyError:
-            out = "unknown"
-        dest = Path(os.path.join(output, out))
+        output_path = get_item_values(item, groupbys)
+        dest = Path(os.path.join(output, *output_path))
         dest.mkdir(parents=True, exist_ok=True)
         json_dest = dest / f"{item_id}.json"
         if not overwrite and json_dest.exists():
@@ -102,7 +124,7 @@ def main(args: argparse.ArgumentParser) -> None:
         f"and {args.retries} retries"
     )
     logger.info(f"Writing to {args.output}")
-    logger.info(f"Splitting JSONs on {args.criteria}")
+    logger.info(f"Splitting JSONs on {args.groupby}")
     next_url = url
     http = get_http(retries=args.retries)
     page_dict = parse_page(http, next_url, data=data, timeout=args.timeout)
@@ -111,11 +133,11 @@ def main(args: argparse.ArgumentParser) -> None:
         total=page_dict["page"]["totalPages"],
         desc="Pages",
     )
-    criteria = args.criteria.split(".")
+    groupby = args.groupby.split(",")
     overwrite = args.overwrite
     delay = float(args.delay)
     for page_num in progress:
-        if not process_page(page_dict, args.output, criteria, overwrite):
+        if not process_page(page_dict, args.output, groupby, overwrite):
             logger.info(f"Found page with no items: {next_url}")
             if args.log:
                 with open(f"page_{page_num}.log", "w") as log_file:
@@ -161,15 +183,21 @@ if __name__ == "__main__":
         help="Number of seconds to wait for a response. Defaults to 300",
         type=int)
     parser.add_argument('--retries', '-r', default=10,
-        help="Number of retries when retrieven a URL. Defaults to 10",
+        help="Number of retries when retrieving a URL. Defaults to 10",
         type=int)
     parser.add_argument('--size', '-s', default=25,
         help="Number of results per page. Defaults to 25 [1-100]",
         type=lambda x: max(1, min(int(x), 100)))
-    parser.add_argument('--criteria',
+    parser.add_argument('--groupby',
         default="accessInfo.accessAllowedFrom",
-        help="JSON field key to use as criteria to split records in the "
-             "output folder. Defaults to 'accessInfo.accessAllowedFrom'")
+        help="JSON field key to use as groupby key to put records in the "
+             "output folder. Defaults to 'accessInfo.accessAllowedFrom'. "
+             "If only part of the value is needed, a regular expression can be "
+             "passed in after a semicolon, as in "
+             "'metadata.originInfo.firstDigitalContentTime:\d{4}-\d{2}-\d{2}'. "
+             "For YYYY-MM-DD dates a short form 'DATE' can be used, and "
+             "for hh:mm:ss times 'TIME' is also available. Comma separated "
+             "values can also be used.")
     parser.add_argument('--overwrite', action='store_true',
         help="Overwrite existing JSON files. "
              "Defaults to false")
