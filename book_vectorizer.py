@@ -100,7 +100,7 @@ def get_text_from_alto(
                 if confidence >= alto_string_threshold:
                     text += line.attrib.get("CONTENT") + " "
     else:
-        logger.info("ALTO error '{url}': namespace {xmlns} is not registered.")
+        logger.info(f"ALTO error '{url}': namespace {xmlns} is not registered.")
     return text
 
 
@@ -345,6 +345,10 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
         total=math.ceil(total / args.batch),
         position=0,
     )
+    if args.inference:
+        model = get_model() if args.n_jobs == 1 else None
+    else:
+        model = None
     results = Parallel(n_jobs=args.n_jobs)(
         delayed(get_vectors)(
             records,
@@ -354,7 +358,7 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
             overwrite=args.overwrite,
             download=args.download_books,
             local_paths=[p.strip() for p in args.search_local_paths.split(",")],
-            model=get_model() if args.n_jobs == 1 else None,
+            model=model,
             on_batches=args.batch > 1 or args.n_jobs < 0 or args.n_jobs > 1,
             bar=bar if args.n_jobs == 1 else None,
             skip=step < args.step,

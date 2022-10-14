@@ -6,7 +6,7 @@ import io
 import json
 import math
 import os
-# import warnings; warnings.filterwarnings("ignore")
+# import warnings; warnings.filterwarnings("ignore", message=".*tensorflow.*")
 from pathlib import Path
 from typing import Iterator, List, NoReturn, Optional, Tuple, Union
 
@@ -122,7 +122,9 @@ def search_image(filename: str, paths: List[Path]) -> Optional[str]:
         for path in paths:
             image_file = path / access / filename
             if image_file.exists():
-                return Image.open(image_file.read_bytes()).convert("RGB")
+                return Image.open(
+                    io.BytesIO(image_file.read_bytes())
+                ).convert("RGB")
     # # Run expensive searchs if not found
     # for path in paths:
     #     for image_file in path.rglob("*"):
@@ -173,7 +175,8 @@ def get_image(
                 logger.info(f"Failed to load image {image_dest.name}")
         if image is None:
             image = download_image(http, iiif)
-        image.save(image_dest, format='JPEG', subsampling=0, quality=100)
+        if image:
+            image.save(image_dest, format='JPEG', subsampling=0, quality=100)
     return image
 
 
@@ -276,6 +279,10 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
         total=math.ceil(total / args.batch),
         position=0,
     )
+    if args.inference:
+        model = get_model() if args.n_jobs == 1 else None
+    else:
+        model = None
     results = Parallel(n_jobs=args.n_jobs)(
         delayed(get_vectors)(
             records,
@@ -285,7 +292,7 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
             overwrite=args.overwrite,
             download=args.download_images,
             local_paths=[p.strip() for p in args.search_local_paths.split(",")],
-            model=get_model() if args.n_jobs == 1 else None,
+            model=model,
             on_batches=args.batch > 1 or args.n_jobs < 0 or args.n_jobs > 1,
             bar=bar if args.n_jobs == 1 else None,
             skip=step < args.step,
