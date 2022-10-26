@@ -1,14 +1,17 @@
 # Dumps all records and objects (books and images) since 2000-01-01 by week
 # $1 output-dir
 
-if [ "$#" -ne 1 ]; then
-  echo "An output-dir must be passed"
+echo "$#"
+if [ "$#" -ne 1 ] && [ "$#" -ne 2 ]; then
+  echo "An output-dir must be passed. Optionally, a start date in YYYYMMDD format can be passed in."
   exit
 else
   OUTPUT=$(realpath ${1})
 fi
 
-INIT_DATE="20151101"  # "20000101"  # There's nothing before 20151101
+echo "STARTED: $(date)"
+
+INIT_DATE="${2:-20151101}"  # "20000101", there's nothing before 20151101
 diff=$((($(date +%s -d "today")-$(date +%s -d ${INIT_DATE}))/$((7*24*3600))))
 echo "Downloading objects for $diff weeks"
 
@@ -83,3 +86,4 @@ for i in $(seq $diff -1 1); do
     --search_local_paths "/nfsmounts/meta2/disk1/content/boktekst/"
 
 done
+echo "ENDED: $(date)"

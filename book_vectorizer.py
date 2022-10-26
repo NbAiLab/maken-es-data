@@ -69,12 +69,13 @@ def get_text_from_alto(
     # Register ALTO namespaces
     # https://www.loc.gov/standards/alto/ | https://github.com/altoxml
     namespace = {
-        'alto-1':   'http://schema.ccs-gmbh.com/metae/alto.xsd',
-        'alto-1.2': 'http://schema.ccs-gmbh.com/metae/alto-1-2.xsd',
-        'alto-1.4': 'http://schema.ccs-gmbh.com/metae/alto-1-4.xsd',
-        'alto-2':   'http://www.loc.gov/standards/alto/ns-v2#',
-        'alto-3':   'http://www.loc.gov/standards/alto/ns-v3#',
-        'alto-4':   'http://www.loc.gov/standards/alto/ns-v4#',
+        'alto-1':      'http://schema.ccs-gmbh.com/metae/alto.xsd',
+        'alto-1.2':    'http://schema.ccs-gmbh.com/metae/alto-1-2.xsd',
+        'nb-alto-1.2': 'http://intern.nb.no/xml/schema/alto-1-2.xsd',
+        'alto-1.4':    'http://schema.ccs-gmbh.com/metae/alto-1-4.xsd',
+        'alto-2':      'http://www.loc.gov/standards/alto/ns-v2#',
+        'alto-3':      'http://www.loc.gov/standards/alto/ns-v3#',
+        'alto-4':      'http://www.loc.gov/standards/alto/ns-v4#',
     }
     logger = get_logger()
     # Extract namespace from document root
@@ -123,8 +124,8 @@ def get_records(
         if batch and math.ceil(index / batch) >= step:
             if not file.is_file() or file.suffix.lower() != ".json":
                 continue
-            with file.open() as record_file:
-                record_json = json.load(record_file)
+            try:
+                record_json = json.loads(file.read_text())
                 urn = (
                     record_json['metadata']['identifiers']['urn']
                     .replace("URN:NBN:no-nb_", "")
@@ -143,6 +144,9 @@ def get_records(
                     'altos': altos_url.format(record_id=record_json['id']),
                     'path': file.relative_to(path).parent
                 }
+            except KeyError as err:
+                logger.info(f"File {file.name} key error: {str(err)}")
+                record = {}
         else:
             record = {}
         if batch is None:
@@ -244,7 +248,8 @@ def get_book(
                 logger.info(f"Failed to load book {book_dest.name}")
         if book is None:
             book = download_book(http, altos, filename)
-        book_dest.write_text(book)
+        if book:
+            book_dest.write_text(book)
     return book
 
 

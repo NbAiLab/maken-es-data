@@ -74,8 +74,8 @@ def get_records(
         if batch and math.ceil(index / batch) >= step:
             if not file.is_file() or file.suffix.lower() != ".json":
                 continue
-            with file.open() as record_file:
-                record_json = json.load(record_file)
+            try:
+                record_json = json.loads(file.read_text())
                 try:
                     iiif = record_json['_links']['thumbnail_custom']['href']
                 except KeyError:
@@ -100,7 +100,9 @@ def get_records(
                     'subject': subjects,
                     'path': file.relative_to(path).parent
                 }
-
+            except KeyError as err:
+                logger.info(f"File {file.name} key error {str(err)}")
+                record = {}
         else:
             record = {}
         if batch is None:
