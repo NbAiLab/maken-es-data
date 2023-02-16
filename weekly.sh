@@ -38,6 +38,7 @@ mkdir -p $WEEK_FOLDER/images/vectors
 python image_vectorizer.py \
   $WEEK_FOLDER/images/records "**/**/*" \
   $WEEK_FOLDER/images/vectors \
+  --objects_dir $WEEK_FOLDER/images/objects \
   --vector_format npy \
   --n_jobs 32 \
   --batch 1000
@@ -64,7 +65,12 @@ python api_downloader.py \
   -o $WEEK_FOLDER/records/books
 
 echo "Creating books vectors"
-python book_vectorizer.py $WEEK_FOLDER/records/books "**/**/*" $WEEK_FOLDER/vectors/books npy _inceptionv3 false true 100 1000 0
+python book_vectorizer.py \
+  $WEEK_FOLDER/records/books "**/**/*" \
+  $WEEK_FOLDER/vectors/books \
+  --objects_dir $WEEK_FOLDER/images/objects \
+  --vector_format json
+#  npy _inceptionv3 false true 100 1000 0
 
 echo "Uploading books vectors"
 gsutil -m cp -r $WEEK_FOLDER/vectors/books $BUCKET/$WEEK_FOLDER/

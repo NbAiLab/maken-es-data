@@ -52,10 +52,10 @@ for i in $(seq $diff -1 1); do
     -o $WEEK_FOLDER/images/records
 
   echo "Downloading images"
-  mkdir -p $WEEK_FOLDER/images/vectors
+  mkdir -p $WEEK_FOLDER/images/objects
   python image_vectorizer.py \
     $WEEK_FOLDER/images/records "**/**/*" \
-    $WEEK_FOLDER/images/vectors \
+    $WEEK_FOLDER/images/objects \
     --no_inference \
     --search_local_paths "/nfsmounts/meta2/disk4/folder1/nancy/maken/catalog/images-vectors,/nfsmounts/meta2/disk4/folder1/nancy/maken/vectors_20211011/images"
 
@@ -78,12 +78,12 @@ for i in $(seq $diff -1 1); do
     -o $WEEK_FOLDER/books/records
 
   echo "Downloading books"
-  mkdir -p $WEEK_FOLDER/books/vectors
+  mkdir -p $WEEK_FOLDER/books/objects
   python book_vectorizer.py \
     $WEEK_FOLDER/books/records "**/**/*" \
-    $WEEK_FOLDER/books/vectors \
+    $WEEK_FOLDER/books/objects \
     --no_inference \
-    --search_local_paths "/nfsmounts/meta2/disk1/content/boktekst/"
+    --search_local_paths "/nfsmounts/dante/lv_ai_1_dante/tesseractprocessedBooks/,/nfsmounts/meta2/disk1/content/boktekst/"
 
 done
 echo "ENDED: $(date)"

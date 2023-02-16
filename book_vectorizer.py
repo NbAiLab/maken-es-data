@@ -99,7 +99,12 @@ def get_text_from_alto(
             for line in lines.findall("String"):
                 confidence = float(line.attrib.get("WC", 0.0))
                 if confidence >= alto_string_threshold:
-                    text += line.attrib.get("CONTENT") + " "
+                    # Handling hyphenated words <HYP>
+                    subs_type = line.attrib.get("SUBS_TYPE")
+                    if subs_type == "HypPart1":
+                        text += line.attrib.get("SUBS_CONTENT") + " "
+                    elif not subs_type:
+                        text += line.attrib.get("CONTENT") + " "
     else:
         logger.info(f"ALTO error '{url}': namespace {xmlns} is not registered.")
     return text
@@ -198,7 +203,9 @@ def download_book(
     return book
 
 
-def search_book(filename: str, paths: List[Path]) -> Optional[str]:
+def search_book(
+    filename: str, paths: List[Path], extension: str="txt"
+) -> Optional[str]:
     for path in paths:
         urn_date_match = URN_DATE_RE.search(filename)
         if urn_date_match:
@@ -206,7 +213,7 @@ def search_book(filename: str, paths: List[Path]) -> Optional[str]:
             book_file = (
                 path
                 / urn_date[1:5] / urn_date[5:7] / urn_date[7:9]
-                / f"{filename}.txt"
+                / f"{filename}.{extension}"
             )
             if book_file.exists():
                 return book_file.read_text()
@@ -256,6 +263,7 @@ def get_book(
 def get_vectors(
     records: Union[dict, Tuple[dict], List[dict]],
     output: Union[Path, str],
+    objects: Optional[Union[Path, str]]=None,
     vector_format: str="npy",
     vector_suffix: str="",
     overwrite: bool=False,
@@ -297,7 +305,10 @@ def get_vectors(
         vector_dest = dest / f"{record_id}{vector_suffix}.{vector_format}"
         if not overwrite and vector_dest.exists():
             continue
-        book_dest = dest / f"{record_id}.txt"
+        if objects:
+            book_dest = Path(objects) / f"{record_id}.txt"
+        else:
+            book_dest = dest / f"{record_id}.txt"
         book = get_book(http, altos, book_dest, download, filename, local_paths)
         if book is None:
             continue
@@ -324,9 +335,11 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
     """Main script"""
     logger = get_logger()
     logger.info(f"Reading records: {args.records_dir}/{args.records_glob}")
-    logger.info(f"Writing vectors: {args.vectors_dir}/{args.records_glob}{args.vectors_suffix}.{args.vectors_format}")
+    logger.info(f"Writing output: {args.output_dir}/{args.records_glob}{args.vectors_suffix}.{args.vectors_format}")
+    if args.objects_dir:
+        logger.info(f"Reading objects: {args.objects_dir}/{args.records_glob}.txt")
     logger.info(f"Vectors will {'' if args.overwrite else 'NOT '}be overwritten")
-    logger.info(f"Books will {'' if args.download_books else 'NOT '}be downloaded if missing")
+    logger.info(f"Books will {'' if args.download else 'NOT '}be downloaded if missing")
     logger.info(f"Inference will {'' if args.inference else 'NOT '}be run")
     logger.info(f"Processing batches of {args.batch} files")
     logger.info(f"Starting from iteration step {args.step}")
@@ -357,11 +370,12 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
     results = Parallel(n_jobs=args.n_jobs)(
         delayed(get_vectors)(
             records,
-            output=args.vectors_dir,
+            output=args.output_dir,
+            objects=args.objects_dir,
             vector_format=args.vectors_format,
             vector_suffix=args.vectors_suffix,
             overwrite=args.overwrite,
-            download=args.download_books,
+            download=args.download,
             local_paths=[p.strip() for p in args.search_local_paths.split(",")],
             model=model,
             on_batches=args.batch > 1 or args.n_jobs < 0 or args.n_jobs > 1,
@@ -381,9 +395,10 @@ if __name__ == '__main__':
     f"Using the records JSON files in records-dir, iterate over them in "
     f"batches, download the corresponding ALTO files if available, "
     f"and turn them into vectors using a custom Dov2Vec. The resulting vectors "
-    f"(and downloaded books) will be stored in vectors-dir. "
-    f"Note that vectors-dir will replicate the structure in records-dir, thus "
-    f"specifying a proper records-glob is mandatory"
+    f"(and downloaded books) will be stored in output-dir. "
+    f"Note that output-dir will replicate the structure in records-dir, thus "
+    f"specifying a proper records-glob is mandatory. If objects-dir is also"
+    f"passed in, it is expected its structure is the same than records-dir"
     f"", epilog=f"""Example usage:
     {__file__} ./records "*" ./vectors --vectors_format txt --n_jobs -1 -b 100
     """, formatter_class=argparse.RawTextHelpFormatter)
@@ -391,8 +406,8 @@ if __name__ == '__main__':
         metavar='records-dir', help='Directory with the records files')
     parser.add_argument('records_glob', default="**/*",
         metavar='records-glob', help='Glob for the directory with the records files')
-    parser.add_argument('vectors_dir',
-        metavar='vectors-dir', help='Directory to store vectors files')
+    parser.add_argument('output_dir',
+        metavar='output-dir', help='Directory to store vectors/objects files')
     parser.add_argument('--vectors_format',
         default="npy",
         help='File format of the vectors files. Either npy, txt, json.',
@@ -401,6 +416,8 @@ if __name__ == '__main__':
         default="",
         help='Filename suffix of the vectors files',
     )
+    parser.add_argument('--objects_dir',
+        default="", help='Directory to read objects files (txt)')
     parser.add_argument('--no_inference', dest='inference',
         action='store_false',
         help='Disable model inference and vector generation. Defaults to False'
@@ -409,7 +426,7 @@ if __name__ == '__main__':
         default=False, action='store_true',
         help='Overwrite vectors. Defaults to False'
     )
-    parser.add_argument('--no_download_books', dest='download_books',
+    parser.add_argument('--no_download', dest='download',
         action='store_false',
         help='Disable downloading books if missing. Defaults to False'
     )

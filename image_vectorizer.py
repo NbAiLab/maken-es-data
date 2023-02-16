@@ -185,6 +185,7 @@ def get_image(
 def get_vectors(
     records: Union[dict, Tuple[dict], List[dict]],
     output: Union[Path, str],
+    objects: Optional[Union[Path, str]]=None,
     vector_format: str="npy",
     vector_suffix: str="",
     overwrite: bool=False,
@@ -226,7 +227,10 @@ def get_vectors(
         vector_dest = dest / f"{record_id}{vector_suffix}.{vector_format}"
         if not overwrite and vector_dest.exists():
             continue
-        image_dest = dest / f"{record_id}.jpg"
+        if objects:
+            image_dest = Path(objects) / f"{record_id}.jpg"
+        else:
+            image_dest = dest / f"{record_id}.jpg"
         image = get_image(
             http, iiif, image_dest, download, filename, local_paths
         )
@@ -256,9 +260,11 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
     """Main script"""
     logger = get_logger()
     logger.info(f"Reading records: {args.records_dir}/{args.records_glob}")
-    logger.info(f"Writing vectors: {args.vectors_dir}/{args.records_glob}{args.vectors_suffix}.{args.vectors_format}")
+    logger.info(f"Writing output: {args.output_dir}/{args.records_glob}{args.vectors_suffix}.{args.vectors_format}")
+    if args.objects_dir:
+        logger.info(f"Reading objects: {args.objects_dir}/{args.records_glob}.jpg")
     logger.info(f"Vectors will {'' if args.overwrite else 'NOT '}be overwritten")
-    logger.info(f"Images will {'' if args.download_images else 'NOT '}be downloaded if missing")
+    logger.info(f"Images will {'' if args.download else 'NOT '}be downloaded if missing")
     logger.info(f"Inference will {'' if args.inference else 'NOT '}be run")
     logger.info(f"Processing batches of {args.batch} files")
     logger.info(f"Starting from iteration step {args.step}")
@@ -288,11 +294,12 @@ def main(args: argparse.ArgumentParser) -> NoReturn:
     results = Parallel(n_jobs=args.n_jobs)(
         delayed(get_vectors)(
             records,
-            output=args.vectors_dir,
+            output=args.output_dir,
+            objects=args.objects_dir,
             vector_format=args.vectors_format,
             vector_suffix=args.vectors_suffix,
             overwrite=args.overwrite,
-            download=args.download_images,
+            download=args.download,
             local_paths=[p.strip() for p in args.search_local_paths.split(",")],
             model=model,
             on_batches=args.batch > 1 or args.n_jobs < 0 or args.n_jobs > 1,
@@ -312,8 +319,8 @@ if __name__ == '__main__':
     f"Using the records JSON files in records-dir, iterate over them in "
     f"batches, download the corresponding IIIF images if available, "
     f"and turn them into vectors using Inception V3. The resulting vectors "
-    f"(and downloaded images) will be stored in vectors-dir. "
-    f"Note that vectors-dir will replicate the structure in records-dir, thus "
+    f"(and downloaded images) will be stored in output-dir. "
+    f"Note that output-dir will replicate the structure in records-dir, thus "
     f"specifying a proper records-glob is mandatory"
     f"", epilog=f"""Example usage:
     {__file__} ./records "*" ./vectors --vectors_format txt --n-jobs -1 -b 100
@@ -322,8 +329,8 @@ if __name__ == '__main__':
         metavar='records-dir', help='Directory with the records files')
     parser.add_argument('records_glob', default="**/*",
         metavar='records-glob', help='Glob for the directory with the records files')
-    parser.add_argument('vectors_dir',
-        metavar='vectors-dir', help='Directory to store vectors files')
+    parser.add_argument('output_dir',
+        metavar='output-dir', help='Directory to store vectors/objects files')
     parser.add_argument('--vectors_format',
         default="npy",
         help='File format of the vectors files. Either npy or vct (plain text)',
@@ -332,6 +339,8 @@ if __name__ == '__main__':
         default="",
         help='Filename suffix of the vectors files',
     )
+    parser.add_argument('--objects_dir',
+        default="", help='Directory to read objects files (jpg)')
     parser.add_argument('--no_inference', dest='inference',
         action='store_false',
         help='Disable model inference and vector generation. Defaults to False'
@@ -340,7 +349,7 @@ if __name__ == '__main__':
         default=False, action='store_true',
         help='Overwrite vectors. Defaults to False'
     )
-    parser.add_argument('--no_download_images', dest='download_images',
+    parser.add_argument('--no_download', dest='download',
         action='store_false',
         help='Disable downloading images if missing. Defaults to False'
     )
