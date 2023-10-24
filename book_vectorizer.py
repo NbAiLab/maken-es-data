@@ -18,6 +18,7 @@ from joblib import Parallel, delayed
 from joblib import Memory
 from tqdm import tqdm
 from gensim.models.doc2vec import Doc2Vec as Model
+from huggingface_hub import snapshot_download
 
 from utils import get_http, get_logger, save_vector
 
@@ -29,11 +30,15 @@ URN_DATE_RE = re.compile(r"_\d{4}\d{2}\d{2}")
 @memory.cache
 def get_model() -> Model:
     """Get a pre-trained model to run inference with"""
-    return None
+    return Model.load(
+        (Path(snapshot_download("NbAiLab/maken-books", cache_dir=location)) / "model.bin").as_posix(),
+        mmap="r"
+    )
 
 
-def preprocess_book(book: str)-> str:
-    return book
+def preprocess_book(book: str) -> Union[str, List[str]]:
+    words = [c for c in re.split(r"\W+", book) if len(c) > 0]
+    return words
 
 
 def model_predict(
@@ -42,16 +47,17 @@ def model_predict(
     on_batches: bool=False
 ) -> np.ndarray:
     if on_batches:
-        pass
-        # vectors = model.predict_on_batch(tf.stack(tensors))
+        raise NotImplementedError("Model does not support batched prediction")
     else:
         # vectors = model.predict(
         #     (tf.expand_dims(t, 0) for t in tensors),
         #     use_multiprocessing=True,
         #     workers=os.cpu_count(),
         # )
-        pass
-    return [0.0]
+        vectors = []
+        for token_list in tokens:
+            vectors.append(model.infer_vector(doc_words=token_list))
+    return np.array(vectors)
 
 
 def get_text_from_alto(
@@ -306,7 +312,7 @@ def get_vectors(
         if not overwrite and vector_dest.exists():
             continue
         if objects:
-            book_dest = Path(objects) / f"{record_id}.txt"
+            book_dest = Path(objects) / path / f"{record_id}.txt"
         else:
             book_dest = dest / f"{record_id}.txt"
         book = get_book(http, altos, book_dest, download, filename, local_paths)

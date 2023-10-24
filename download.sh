@@ -1,7 +1,7 @@
+#!/bin/bash
 # Dumps all records and objects (books and images) since 2000-01-01 by week
 # $1 output-dir
 
-echo "$#"
 if [ "$#" -ne 1 ] && [ "$#" -ne 2 ]; then
   echo "An output-dir must be passed. Optionally, a start date in YYYYMMDD format can be passed in."
   exit
@@ -39,7 +39,7 @@ for i in $(seq $diff -1 1); do
 
   echo "Downloading images records"
   mkdir -p $WEEK_FOLDER/images/records
-  python api_downloader.py \
+  python downloader.py \
     -f "firstDigitalContentTime:[$START_DATE TO $END_DATE]" \
     -f mediatype:bilder \
     -f contentClasses:JP2 \
@@ -67,7 +67,7 @@ for i in $(seq $diff -1 1); do
 
   echo "Downloading books records"
   mkdir -p $WEEK_FOLDER/books/records
-  python api_downloader.py \
+  python downloader.py \
     -f "firstDigitalContentTime:[$START_DATE TO $END_DATE]" \
     -f mediatype:bøker \
     --groupby "accessInfo.accessAllowedFrom,metadata.originInfo.firstDigitalContentTime:DATE" \

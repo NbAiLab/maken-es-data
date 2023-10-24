@@ -1,76 +1,34 @@
-echo "Cron job started"
+#!/bin/bash
+# Dumps all records and objects (books and images) since 2000-01-01 by week
+# $1 output-dir
+
+if [ "$#" -ne 1 ]; then
+  echo "An output-dir must be passed only. Start date is Monday last week."
+  exit
+else
+  OUTPUT=$(realpath ${1})
+fi
+
+if [[ $(date +%u) -eq 1 ]]; then
+    echo 'Sorry, you cannot run this program on a Monday.'
+    exit
+fi
+
+echo "--------------------"
+echo "| Cron job started |"
+echo "--------------------"
+
 
 START_DATE_LAST_WEEK=$(date -d "last monday-7 days" +"%Y%m%d")
 END_DATE_LAST_WEEK=$(date -d "last monday-1 day" +"%Y%m%d")
 
-START_DATE="${1:-$START_DATE_LAST_WEEK}"
-END_DATE="${2:-$END_DATE_LAST_WEEK}"
-BUCKET="${3:-gs://maken-vectors}"
 
-echo "Time period: $START_DATE to $END_DATE"
+echo "Time period: $START_DATE_LAST_WEEK to $END_DATE_LAST_WEEK"
 
-WEEK_FOLDER="$START_DATE-$END_DATE"
+./download.sh $OUTPUT $START_DATE_LAST_WEEK
+./vectorize.sh $OUTPUT $START_DATE_LAST_WEEK
+./ingest.sh $OUTPUT $START_DATE_LAST_WEEK
 
-mkdir -p $WEEK_FOLDER
-
-echo
-echo "-----------"
-echo "| IMAGES  |"
-echo "-----------"
-echo
-
-echo "Downloading images records"
-mkdir -p $WEEK_FOLDER/images/records
-python api_downloader.py \
-  -f "firstDigitalContentTime:[$START_DATE TO $END_DATE]" \
-  -f mediatype:bilder \
-  -f contentClasses:JP2 \
-  -f digital:Ja \
-  --groupby "accessInfo.accessAllowedFrom,metadata.originInfo.firstDigitalContentTime:DATE" \
-  --size 100 \
-  --scroll \
-  --delay 0.0 \
-  --log \
-  -o $WEEK_FOLDER/images/records
-
-echo "Creating image vectors"
-mkdir -p $WEEK_FOLDER/images/vectors
-python image_vectorizer.py \
-  $WEEK_FOLDER/images/records "**/**/*" \
-  $WEEK_FOLDER/images/vectors \
-  --objects_dir $WEEK_FOLDER/images/objects \
-  --vector_format npy \
-  --n_jobs 32 \
-  --batch 1000
-
-echo "Uploading images records and vectors"
-gsutil -m rsync -am --include='*.npy' --include='*.json' --include='*/' --exclude='*' $WEEK_FOLDER/images $BUCKET/$WEEK_FOLDER/images
-
-
-echo
-echo "----------"
-echo "| BOOKS  |"
-echo "----------"
-echo
-
-echo "Downloading books records"
-python api_downloader.py \
-  -f "firstDigitalContentTime:[$START_DATE TO $END_DATE]" \
-  -f mediatype:bøker \
-  --groupby "accessInfo.accessAllowedFrom,metadata.originInfo.firstDigitalContentTime:DATE" \
-  --size 100 \
-  --scroll \
-  --delay 0.0 \
-  --log \
-  -o $WEEK_FOLDER/records/books
-
-echo "Creating books vectors"
-python book_vectorizer.py \
-  $WEEK_FOLDER/records/books "**/**/*" \
-  $WEEK_FOLDER/vectors/books \
-  --objects_dir $WEEK_FOLDER/images/objects \
-  --vector_format json
-#  npy _inceptionv3 false true 100 1000 0
-
-echo "Uploading books vectors"
-gsutil -m cp -r $WEEK_FOLDER/vectors/books $BUCKET/$WEEK_FOLDER/
+echo "---------------------"
+echo "| Cron job finished |"
+echo "---------------------"

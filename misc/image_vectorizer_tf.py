@@ -10,15 +10,17 @@ import os
 from pathlib import Path
 from typing import Iterator, List, NoReturn, Optional, Tuple, Union
 
-import torch
 import requests
 from joblib import Parallel, delayed
 from joblib import Memory
 from PIL import Image, ImageFile, UnidentifiedImageError
 from tqdm import tqdm
 
-from transformers import PreTrainedModel as Model
-from transformers import CLIPModel, CLIPProcessor
+import tensorflow as tf
+from tensorflow.keras.applications import InceptionV3
+from tensorflow.keras.applications.inception_v3 import preprocess_input
+from tensorflow.keras.models import Model
+from tensorflow.keras.preprocessing.image import img_to_array
 
 from utils import get_http, get_logger, save_vector
 
@@ -26,26 +28,33 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 location = os.environ.get("CACHE_DIR", ".cache")
 memory = Memory(location, verbose=0)
-model_name = os.environ.get("MODEL_NAME", "openai/clip-vit-large-patch14")
-processor = CLIPProcessor.from_pretrained(model_name)
 
 
 @memory.cache
 def get_model() -> Model:
     """Get a pre-trained model to run inference with"""
-    return CLIPModel.from_pretrained(model_name)
+    base = InceptionV3(include_top=True, weights='imagenet')
+    return Model(inputs=base.input, outputs=base.get_layer('avg_pool').output)
 
 
-def preprocess_image(image: Image.Image)-> torch.Tensor:
-    return processor(images=[image], return_tensors="pt", padding=True)["pixel_values"][0]
+def preprocess_image(image: Image.Image)-> tf.Tensor:
+    return preprocess_input(img_to_array(image.resize((299, 299))))
 
 
 def model_predict(
     model: Model,
-    tensors: List[torch.Tensor],
+    tensors: List[tf.Tensor],
     on_batches: bool=False
-) -> torch.Tensor:
-    return model.get_image_features(pixel_values=torch.stack(tensors))
+) -> tf.Tensor:
+    if on_batches:
+        vectors = model.predict_on_batch(tf.stack(tensors))
+    else:
+        vectors = model.predict(
+            (tf.expand_dims(t, 0) for t in tensors),
+            use_multiprocessing=True,
+            workers=os.cpu_count(),
+        )
+    return vectors
 
 
 def get_records(
@@ -219,7 +228,7 @@ def get_vectors(
         if not overwrite and vector_dest.exists():
             continue
         if objects:
-            image_dest = Path(objects) / path / f"{record_id}.jpg"
+            image_dest = Path(objects) / f"{record_id}.jpg"
         else:
             image_dest = dest / f"{record_id}.jpg"
         image = get_image(
@@ -236,7 +245,7 @@ def get_vectors(
         vectors = model_predict(model, tensors, on_batches)
         for vector_dest, vector in zip(vector_dests, vectors):
             save_vector(
-                vector.squeeze().detach().numpy(), vector_dest, vector_format, record=record,
+                vector.squeeze(), vector_dest, vector_format, record=record,
             )
             if bar is not None:
                 bar.set_description(
