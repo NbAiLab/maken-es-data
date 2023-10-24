@@ -14,9 +14,9 @@ if [[ $(date +%u) -eq 1 ]]; then
     exit
 fi
 
-echo "--------------------"
-echo "| Cron job started |"
-echo "--------------------"
+echo "---------------"
+echo "| Job started |"
+echo "---------------"
 
 
 START_DATE_LAST_WEEK=$(date -d "last monday-7 days" +"%Y%m%d")
@@ -25,10 +25,10 @@ END_DATE_LAST_WEEK=$(date -d "last monday-1 day" +"%Y%m%d")
 
 echo "Time period: $START_DATE_LAST_WEEK to $END_DATE_LAST_WEEK"
 
-./download.sh $OUTPUT $START_DATE_LAST_WEEK
-./vectorize.sh $OUTPUT $START_DATE_LAST_WEEK
+# ./download.sh $OUTPUT $START_DATE_LAST_WEEK
+# ./vectorize.sh $OUTPUT $START_DATE_LAST_WEEK
 ./ingest.sh $OUTPUT $START_DATE_LAST_WEEK
 
-echo "---------------------"
-echo "| Cron job finished |"
-echo "---------------------"
+echo "-----------------"
+echo "| Job finished |"
+echo "----------------"
